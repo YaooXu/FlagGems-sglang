@@ -668,13 +668,20 @@ class Benchmark:
                     self.torch_op, *args, **kwargs
                 )
             if "latency" in self.to_bench_metrics:
-                candidate, dispatch, _ = self._candidate_call()
+                candidate, dispatch, is_override = self._candidate_call()
+                registry = Config.override_registry if is_override else None
+                override_key = f"flaggems_sglang.{self.op_name}"
+                before_override = registry.call_counts().get(override_key, 0) if registry else 0
                 execution = reference_execution()
                 before = execution.candidate_calls if execution else 0
                 with dispatch:
                     metric.latency = self.get_latency(
                         candidate, *args, **kwargs
                     )
+                if registry is not None:
+                    if registry.call_counts().get(override_key, 0) <= before_override:
+                        raise RuntimeError("benchmark timer did not invoke the injected candidate")
+                    metric.candidate_source = "override"
                 if reference_mode_enabled():
                     if execution.candidate_calls <= before:
                         raise ReferenceContractError(

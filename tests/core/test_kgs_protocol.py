@@ -1,6 +1,8 @@
 """Per-case invocation evidence, including failures and bypasses."""
 from types import SimpleNamespace
 
+import pytest
+
 from tests import conftest
 from flaggems_sglang.dynamic_registry import DynamicOpOverride
 
@@ -27,3 +29,36 @@ def test_each_correctness_case_records_only_its_own_calls():
         except StopIteration:
             pass
         assert conftest.TEST_RESULTS[name]['candidate_calls'] == {'flaggems_sglang.op': increments}
+
+
+@pytest.mark.parametrize('invoke', [True, False])
+def test_benchmark_override_evidence_requires_actual_invocation(monkeypatch, invoke):
+    from contextlib import nullcontext
+    from benchmark import performance_utils as base
+    registry = DynamicOpOverride()
+    registry._call_counts['flaggems_sglang.op'] = 0
+    monkeypatch.setattr(base, 'Config', SimpleNamespace(override_registry=registry))
+    monkeypatch.setattr(base, 'reference_mode_enabled', lambda: False)
+    monkeypatch.setattr(base, 'reference_execution', lambda: None)
+    bench = base.Benchmark.__new__(base.Benchmark)
+    bench.op_name = 'op'
+    bench.to_bench_metrics = ['latency']
+    bench.unpack_to_args_kwargs = lambda value: ((), {})
+    bench.record_shapes = lambda: []
+
+    def candidate():
+        registry._call_counts['flaggems_sglang.op'] += 1
+
+    bench._candidate_call = lambda: (candidate, nullcontext(), True)
+
+    def latency(op, *args, **kwargs):
+        if invoke:
+            op()
+        return 0.01
+
+    bench.get_latency = latency
+    if invoke:
+        assert bench._measure_input(None).candidate_source == 'override'
+    else:
+        with pytest.raises(pytest.fail.Exception, match='did not invoke'):
+            bench._measure_input(None)
