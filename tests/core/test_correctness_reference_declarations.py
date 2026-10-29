@@ -17,7 +17,9 @@ OPERATORS = sorted(p.stem[5:] for p in (ROOT / "tests").glob("test_*.py"))
 DICT_OPERATORS = [
     op
     for op in OPERATORS
-    if op not in {"mrope_fused", "softcap_inplace_logits"}
+    # Handwritten in-place mRoPE suites have their own contract tests.
+    if op
+    not in {"mrope_fused", "triton_mrope_fused", "softcap_inplace_logits"}
 ]
 
 
