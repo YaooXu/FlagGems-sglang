@@ -155,7 +155,9 @@ jobs:
             git fetch --depth=1 --no-tags origin "$1" 2>/dev/null
           }
 
-          if [[ "${EVENT_NAME}" == "pull_request" ]] && fetch_sha "${PR_BASE_SHA}"; then
+          if [[ "${EVENT_NAME}" == "workflow_dispatch" ]]; then
+            echo "tests/test_chain_speculative_sampling.py" > changed_files.txt
+          elif [[ "${EVENT_NAME}" == "pull_request" ]] && fetch_sha "${PR_BASE_SHA}"; then
             git diff --name-only "${PR_BASE_SHA}" "${GITHUB_SHA}" > changed_files.txt
           elif [[ -n "${BEFORE_SHA}" && "${BEFORE_SHA}" != "0000000000000000000000000000000000000000" ]] \
                && fetch_sha "${BEFORE_SHA}"; then
