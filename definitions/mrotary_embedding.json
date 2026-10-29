@@ -1,8 +1,8 @@
 {
   "api_version": "v6.0",
-  "name": "triton_mrope_fused",
+  "name": "mrotary_embedding",
   "requires_triton_kernel": true,
-  "description": "SGLang v0.5.11 multimodal RoPE in-place q/k ABI. Workload: head_size256, rotary_dim64, sections11/11/10, THW interleaving, Neox pairing. Preserve the trailing192 channels. Returns Python None; positions may be strided.",
+  "description": "mrotary_embedding requirement, implemented by native triton_mrope_fused. SGLang v0.5.11 multimodal RoPE in-place q/k ABI. Workload: head_size256, rotary_dim64, sections11/11/10, THW interleaving, Neox pairing. Preserve the trailing192 channels. Returns Python None; positions may be strided.",
   "parameters": [
     {
       "name": "q",

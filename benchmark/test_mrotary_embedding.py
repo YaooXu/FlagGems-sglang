@@ -8,7 +8,7 @@ import torch
 
 import flaggems_sglang
 from flaggems_sglang.reference import get_reference
-from flaggems_sglang.reference.triton_mrope_fused import (
+from flaggems_sglang.reference.mrotary_embedding import (
     WORKLOADS,
     build_inputs,
     case_parameters,
@@ -37,11 +37,11 @@ def _case_fn(shape, cur_dtype):
     )
 
 
-@pytest.mark.triton_mrope_fused
-def test_perf_triton_mrope_fused():
+@pytest.mark.mrotary_embedding
+def test_perf_mrotary_embedding():
     bench = OpBenchmark(
-        op_name="triton_mrope_fused",
-        torch_op=get_reference("triton_mrope_fused"),
+        op_name="mrotary_embedding",
+        torch_op=get_reference("mrotary_embedding"),
         case_fn=_case_fn,
         build_inputs_fn=single_input_builder(_input_fn),
         dtypes=[torch.bfloat16],
@@ -57,6 +57,6 @@ def test_perf_triton_mrope_fused():
             bench.set_gems_from_module(flaggems_sglang)
         except AttributeError:
             pytest.skip(
-                "triton_mrope_fused: supply a candidate with --override"
+                "mrotary_embedding: supply a candidate with --override"
             )
     bench.run()

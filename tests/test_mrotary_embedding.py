@@ -9,7 +9,7 @@ import pytest
 import torch
 
 from flaggems_sglang.reference import get_reference
-from flaggems_sglang.reference import triton_mrope_fused as native
+from flaggems_sglang.reference import mrotary_embedding as native
 from flaggems_sglang.reference_candidate import get_candidate
 
 from . import conftest as cfg
@@ -74,7 +74,7 @@ def _make_case(case):
 _CASE_FACTORIES = [lambda row=row: _make_case(row) for row in WORKLOADS]
 
 
-@pytest.mark.triton_mrope_fused
+@pytest.mark.mrotary_embedding
 @pytest.mark.parametrize(
     "case_idx",
     range(len(WORKLOADS)),
@@ -83,15 +83,15 @@ _CASE_FACTORIES = [lambda row=row: _make_case(row) for row in WORKLOADS]
         for c in WORKLOADS
     ],
 )
-def test_triton_mrope_fused(case_idx):
+def test_mrotary_embedding(case_idx):
     case = _CASE_FACTORIES[case_idx]()
     check = case.pop("check")
     reference_inputs = case.pop("_reference_inputs", case)
-    reference = get_reference("triton_mrope_fused")
+    reference = get_reference("mrotary_embedding")
     expected = reference(**reference_inputs)
     try:
-        candidate = get_candidate("triton_mrope_fused", reference=reference)
+        candidate = get_candidate("mrotary_embedding", reference=reference)
     except ImportError:
-        pytest.skip("triton_mrope_fused: supply a candidate with --override")
+        pytest.skip("mrotary_embedding: supply a candidate with --override")
     actual = candidate(**case)
     check(actual, expected)
