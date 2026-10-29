@@ -8,34 +8,31 @@ import torch
 
 import flaggems_sglang
 from flaggems_sglang.reference import get_reference
-from flaggems_sglang.reference_candidate import reference_mode_enabled
-from flaggems_sglang.testing.mrope_workloads import (
+from flaggems_sglang.reference.triton_mrope_fused import (
+    WORKLOADS,
     build_inputs,
-    describe,
-    parameters,
-    workloads,
+    case_parameters,
+    describe_inputs,
 )
+from flaggems_sglang.reference_candidate import reference_mode_enabled
 
 from . import conftest
 from .cases import BenchmarkCasePlan, single_input_builder
 from .op_benchmark import OpBenchmark, is_case_listing
 
-CORE = workloads()
-ALL = workloads(comprehensive=True)
-SHAPES = [(i,) for i in range(len(CORE))]
-MORE_SHAPES = [(i,) for i in range(len(CORE), len(ALL))]
+SHAPES = [(i,) for i in range(len(WORKLOADS))]
 
 
 def _input_fn(shape, cur_dtype, device):
-    yield (build_inputs(ALL[shape[0]], cur_dtype, device),)
+    yield (build_inputs(WORKLOADS[shape[0]], cur_dtype, device),)
 
 
 def _case_fn(shape, cur_dtype):
     del cur_dtype
-    case = ALL[shape[0]]
+    case = WORKLOADS[shape[0]]
     yield BenchmarkCasePlan(
-        shape=describe(case),
-        params=dict(parameters(case), configuration=shape),
+        shape=describe_inputs(case),
+        params=dict(case_parameters(case), configuration=shape),
         builder_args=(shape,),
     )
 
@@ -49,7 +46,6 @@ def test_perf_triton_mrope_fused():
         build_inputs_fn=single_input_builder(_input_fn),
         dtypes=[torch.bfloat16],
         shapes=SHAPES,
-        more_shapes=MORE_SHAPES,
         shape_desc="Qwen3.6 TP4 mRoPE configuration",
     )
     if not (
