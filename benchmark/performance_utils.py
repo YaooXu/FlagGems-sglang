@@ -980,9 +980,13 @@ class Benchmark:
                 )
                 record["stage"] = "invoke"
                 record["count"] = 1
+                started = time.perf_counter()
                 fn()
                 record["stage"] = "synchronize"
                 torch_device_fn.synchronize()
+                # Readiness records a real, synchronized single invocation.
+                # This is not the warmed benchmark performance denominator.
+                record["latency_ms"] = (time.perf_counter() - started) * 1000
             except pytest.skip.Exception as error:
                 record.update(status="SKIP", reason=str(error))
                 raise
