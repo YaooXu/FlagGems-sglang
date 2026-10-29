@@ -673,7 +673,8 @@ class Benchmark:
                 override_key = f"flaggems_sglang.{self.op_name}"
                 before_override = (
                     registry.call_counts().get(override_key, 0)
-                    if registry else 0
+                    if registry
+                    else 0
                 )
                 execution = reference_execution()
                 before = execution.candidate_calls if execution else 0
@@ -682,7 +683,9 @@ class Benchmark:
                         candidate, *args, **kwargs
                     )
                 if registry is not None:
-                    after_override = registry.call_counts().get(override_key, 0)
+                    after_override = registry.call_counts().get(
+                        override_key, 0
+                    )
                     if after_override <= before_override:
                         raise RuntimeError(
                             "benchmark timer did not invoke the injected candidate"
