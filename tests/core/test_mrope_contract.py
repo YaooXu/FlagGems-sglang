@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 
 import pytest
+
 import flaggems_sglang
 from flaggems_sglang.reference import get_reference
 from flaggems_sglang.reference_candidate import reference_test_mode
