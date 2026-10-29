@@ -17,11 +17,12 @@
 import importlib
 import json
 
-import flaggems_sglang
 import pytest
 import torch
 import triton
 import triton.language as tl
+
+import flaggems_sglang
 from flaggems_sglang.ops.chain_speculative_sampling import base_group_prefix
 from flaggems_sglang.reference import get_reference
 
@@ -402,6 +403,7 @@ def _chain_diagnose(kwargs, actual, expected):
         actual_token = int(actual[0][actual_slot].item())
         traced_token = _chain_token(trace, ntarget)
         isolated_token = int(predicts[0].item())
+        trace_matches_actual = traced_token == actual_token == isolated_token
         mixed = {
             "torch_cdf_torch_sum": _chain_token(ref_cdf, rt),
             "torch_cdf_native_sum": _chain_token(ref_cdf, ntarget),
@@ -426,7 +428,7 @@ def _chain_diagnose(kwargs, actual, expected):
             actual_token=actual_token,
             isolated_native_token=isolated_token,
             traced_native_token=traced_token,
-            trace_matches_actual=traced_token == actual_token == isolated_token,
+            trace_matches_actual=trace_matches_actual,
             coin=float(coin.item()),
             reference_sum=float(ref_sum.item()),
             native_sum=float(native_sum[0].item()),
