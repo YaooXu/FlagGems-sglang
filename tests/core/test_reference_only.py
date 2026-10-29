@@ -81,7 +81,10 @@ def test_benchmark_runs_original_baseline_once(runner, selected, expected):
         for r in config.reference_records
     )
     assert all(r["latency_ms"] >= 0 for r in config.reference_records)
-    assert reference_report(config.reference_records)["schema_version"] == "flaggems.reference/v2"
+    assert (
+        reference_report(config.reference_records)["schema_version"]
+        == "flaggems.reference/v2"
+    )
 
 
 def test_backward_reference_uses_original_grad_semantics(runner, monkeypatch):
