@@ -16,3 +16,9 @@ underscores. Pytest marker naming is a separate convention.
 Add the definition alongside its tests and benchmark in the same PR, targeting
 `kernelgen-dev`. Keep it aligned with the tested parameters, outputs, mutations
 and aliases whenever the operator contract changes.
+
+See [`silu_and_mul.json`](silu_and_mul.json) for a complete example using the
+FlagGems-style `v6.0` fields: a required tensor input, one logical output,
+mutation/alias metadata, and the `requires_triton_kernel` planning flag. The
+flag is `true` because this operator computes an activation and multiplication
+and materializes a new output tensor.

@@ -1,0 +1,21 @@
+{
+  "api_version": "v6.0",
+  "name": "silu_and_mul",
+  "requires_triton_kernel": true,
+  "description": "Fused gated SiLU activation with signature silu_and_mul(hidden_states: torch.Tensor) -> torch.Tensor. For a floating-point input of shape [..., 2*d] with an even last dimension, split it into x1 = hidden_states[..., :d] and x3 = hidden_states[..., d:]. Compute silu(x1.float()) * x3.float() in float32 and cast the result back to the input dtype, matching the explicit reference. Return a newly allocated tensor of shape [..., d] on the input device, without mutating or aliasing the input. The current correctness and benchmark suites exercise two-dimensional bfloat16 inputs.",
+  "parameters": [
+    {
+      "name": "hidden_states",
+      "kind": "positional_or_keyword",
+      "required": true,
+      "type_hint": "torch.Tensor"
+    }
+  ],
+  "outputs": [
+    "out"
+  ],
+  "effects": {
+    "mutates": [],
+    "returns_alias_of": {}
+  }
+}
