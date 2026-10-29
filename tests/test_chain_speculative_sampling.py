@@ -130,6 +130,7 @@ CORRECTNESS_CASES = list(range(len(_CASE_FACTORIES)))
 @pytest.mark.parametrize("case_idx", range(len(CORRECTNESS_CASES)))
 @pytest.mark.chain_speculative_sampling
 def test_chain_speculative_sampling(case_idx):
+    # CI control: execute the unchanged native test body from master.
     # Build only this case; a module-level list would allocate
     # every case's tensors at import time.
     case = _CASE_FACTORIES[case_idx]()
