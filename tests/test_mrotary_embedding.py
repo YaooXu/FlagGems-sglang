@@ -14,7 +14,8 @@ from flaggems_sglang.reference_candidate import get_candidate
 
 from . import conftest as cfg
 
-WORKLOADS = native.WORKLOADS
+# Keep the six documented workloads, plus one correctness-only routing case.
+WORKLOADS = native.WORKLOADS + [dict(native.WORKLOADS[4], axis_routing=True)]
 
 
 def _make_case(case):
@@ -23,6 +24,10 @@ def _make_case(case):
             "The native Triton reference requires a GPU; omit --ref cpu."
         )
     inputs = native.build_inputs(case, torch.bfloat16, cfg.device)
+    if case.get("axis_routing"):
+        inputs["positions"].add_(
+            torch.arange(3, device=cfg.device, dtype=torch.int64)[:, None] * 7
+        )
     reference_inputs = {
         name: (
             torch.empty_strided(
@@ -36,7 +41,19 @@ def _make_case(case):
         )
         for name, value in inputs.items()
     }
-    storage = {name: inputs[name].untyped_storage() for name in ("q", "k")}
+    storage = {}
+    for name in ("q", "k"):
+        handle = inputs[name].untyped_storage()
+        # Retain the allocation, but compare immutable snapshots: resize_ can
+        # change a retained Storage object's pointer and size in place.
+        storage[name] = (
+            handle,
+            (
+                handle.data_ptr(),
+                handle.nbytes(),
+                inputs[name].storage_offset(),
+            ),
+        )
 
     def check(actual, expected):
         # Both callables return None. Their in-place q/k results are compared.
@@ -54,10 +71,12 @@ def _make_case(case):
                 value.dtype == wanted.dtype and value.device == wanted.device
             )
             if name in ("q", "k"):
+                current = value.untyped_storage()
                 assert (
-                    value.untyped_storage().data_ptr()
-                    == storage[name].data_ptr()
-                )
+                    current.data_ptr(),
+                    current.nbytes(),
+                    value.storage_offset(),
+                ) == storage[name][1]
                 torch.testing.assert_close(
                     value, wanted, atol=2e-3, rtol=0.016, equal_nan=False
                 )
@@ -80,6 +99,7 @@ _CASE_FACTORIES = [lambda row=row: _make_case(row) for row in WORKLOADS]
     range(len(WORKLOADS)),
     ids=[
         f"{c['model']}-{c['tokens']}-stride{c['position_stride']}"
+        + ("-axis-routing" if c.get("axis_routing") else "")
         for c in WORKLOADS
     ],
 )
