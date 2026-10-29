@@ -14,10 +14,15 @@
 
 """Correctness test for sampling_grammar/chain_speculative_sampling."""
 
-import pytest
-import torch
+import importlib
+import json
 
 import flaggems_sglang
+import pytest
+import torch
+import triton
+import triton.language as tl
+from flaggems_sglang.ops.chain_speculative_sampling import base_group_prefix
 from flaggems_sglang.reference import get_reference
 
 # ---------------------------------------------------------------------------
@@ -162,6 +167,20 @@ def test_chain_speculative_sampling(case_idx):
         )
         return
 
+    # Temporary CI diagnostics only; original assertions remain below.
+    if case_idx == 8:
+        try:
+            _chain_diagnose(kwargs, actual, expected)
+        except Exception as diagnostic_error:
+            import traceback
+
+            print(
+                "[CHAIN-DIAG-20261029] diagnostic error:",
+                repr(diagnostic_error),
+                flush=True,
+            )
+            traceback.print_exc()
+
     # Compare
     if check is not None:
         check(actual, expected)
@@ -176,3 +195,252 @@ def test_chain_speculative_sampling(case_idx):
     # Restore check for reuse
     if check is not None:
         case["check"] = check
+
+
+def _chain_emit(label, **values):
+    print(
+        "[CHAIN-DIAG-20261029] " + json.dumps(dict(label=label, **values)),
+        flush=True,
+    )
+
+
+@triton.jit
+def _chain_trace_cdf(
+    Values, Totals, Trace, V: tl.constexpr, ITEMS: tl.constexpr
+):
+    # Mirror base_sample_kernel's prefix operations without changing the real call.
+    tile = tl.program_id(0)
+    t = tl.arange(0, 128)
+    dtype: tl.constexpr = Values.dtype.element_ty
+    prefix, unused = base_group_prefix(Values, 0, tile, V, ITEMS)
+    carry = tl.full((), 0.0, tl.float32)
+    for window in range(tl.cdiv(tile, 32)):
+        previous = tile - 1 - window * 32 - t
+        partial = tl.load(Totals + previous, (previous >= 0) & (t < 32), 0).to(
+            tl.float32
+        )
+        for j in tl.static_range(5):
+            other = tl.gather(partial, tl.minimum(t + (1 << j), 127), 0)
+            partial = (partial + other).to(dtype).to(tl.float32)
+        window_sum = tl.sum(tl.where(t == 0, partial, 0.0), 0)
+        carry = (window_sum + carry).to(dtype).to(tl.float32)
+    current = (carry + prefix).to(dtype).to(tl.float32)
+    for k in tl.static_range(ITEMS):
+        idx = tile * 128 * ITEMS + t * ITEMS + k
+        val = tl.load(Values + idx, idx < V, 0).to(tl.float32)
+        current = (current + val).to(dtype).to(tl.float32)
+        tl.store(Trace + idx, current, idx < V)
+
+
+def _chain_token(cdf, threshold):
+    matches = torch.nonzero(cdf > threshold).flatten()
+    return int(matches[0].item()) if matches.numel() else cdf.numel() - 1
+
+
+def _chain_diagnose(kwargs, actual, expected):
+    from flaggems_sglang.reference_candidate import get_candidate
+
+    native = importlib.import_module(
+        "flaggems_sglang.ops.chain_speculative_sampling"
+    )
+    public = flaggems_sglang.chain_speculative_sampling
+    helper = get_candidate(
+        "chain_speculative_sampling",
+        reference=get_reference("chain_speculative_sampling"),
+    )
+    torch.cuda.synchronize()
+    differences = [
+        (a != e).nonzero().cpu().tolist() for a, e in zip(actual, expected)
+    ]
+    _chain_emit(
+        "outputs",
+        torch=torch.__version__,
+        cuda=torch.version.cuda,
+        triton=triton.__version__,
+        gpu=torch.cuda.get_device_name(),
+        deterministic=torch.are_deterministic_algorithms_enabled(),
+        candidate_module=public.__module__,
+        helper_is_public=helper is public,
+        output_mismatch_counts=[len(d) for d in differences],
+        first_mismatches=[d[:8] for d in differences],
+    )
+    # Same tensors and original public function; check repeatability and helper identity.
+    for repeat in range(2):
+        repeated = helper(**kwargs)
+        torch.cuda.synchronize()
+        _chain_emit(
+            "repeat",
+            repeat=repeat,
+            versus_original=[
+                int((a != b).sum().item()) for a, b in zip(repeated, actual)
+            ],
+            versus_reference=[
+                int((a != e).sum().item()) for a, e in zip(repeated, expected)
+            ],
+        )
+        del repeated
+
+    if not differences[0]:
+        return
+    batch, steps = kwargs["candidates"].shape
+    vocab = kwargs["target_probs"].shape[-1]
+    rows = sorted({pos[0] // steps for pos in differences[0]})
+    for b in rows[:4]:
+        rn = int(expected[2][b].item())
+        an = int(actual[2][b].item())
+        reference_slot = int(expected[1][b, rn].item())
+        actual_slot = int(actual[1][b, an].item())
+        _chain_emit(
+            "row",
+            b=b,
+            reference_accepted=rn,
+            actual_accepted=an,
+            reference_index=expected[1][b].cpu().tolist(),
+            actual_index=actual[1][b].cpu().tolist(),
+            reference_final_slot=reference_slot,
+            actual_final_slot=actual_slot,
+            reference_token=int(expected[0][reference_slot].item()),
+            actual_token=int(actual[0][actual_slot].item()),
+        )
+        if rn != an or not torch.equal(actual[1][b], expected[1][b]):
+            _chain_emit(
+                "acceptance_diff",
+                b=b,
+                candidate_tokens=kwargs["candidates"][b].cpu().tolist(),
+                coins=kwargs["uniform_samples"][b].cpu().tolist(),
+            )
+            for step in range(1, steps):
+                token = int(kwargs["candidates"][b, step].item())
+                p = kwargs["target_probs"][b, step - 1, token]
+                q = kwargs["draft_probs"][b, step - 1, token]
+                u = kwargs["uniform_samples"][b, step - 1]
+                _chain_emit(
+                    "acceptance_threshold",
+                    b=b,
+                    step=step,
+                    token=token,
+                    p=float(p.item()),
+                    q=float(q.item()),
+                    coin=float(u.item()),
+                    product=float((u * q).item()),
+                    margin=float((p - u * q).item()),
+                )
+            continue
+
+        p = kwargs["target_probs"][b, rn]
+        val = (
+            p.clone()
+            if rn == steps - 1
+            else (
+                p - torch.nan_to_num(kwargs["draft_probs"][b, rn], nan=0.0)
+            ).clamp(min=0.0)
+        )
+        device = p.device
+        values = torch.empty((1, vocab), device=device, dtype=p.dtype)
+        native_sum = torch.empty((1,), device=device, dtype=p.dtype)
+        predicts = torch.empty((1,), device=device, dtype=torch.int32)
+        slots = torch.zeros((1,), device=device, dtype=torch.int32)
+        row = torch.tensor([rn], device=device, dtype=torch.int32)
+        accepted = torch.tensor(
+            [int(rn == steps - 1)], device=device, dtype=torch.int32
+        )
+        native.base_values_kernel[(1, triton.cdiv(vocab, 256))](
+            values,
+            kwargs["target_probs"][b : b + 1],
+            kwargs["draft_probs"][b : b + 1],
+            row,
+            accepted,
+            S=steps,
+            V=vocab,
+            FMAX=torch.finfo(p.dtype).max,
+            BLOCK=256,
+            enable_fp_fusion=False,
+        )
+        nt = min(
+            512, 1 << ((vocab // 4 if vocab > 128 else vocab).bit_length() - 1)
+        )
+        native.base_sum_kernel[(1,)](
+            values,
+            native_sum,
+            predicts,
+            slots,
+            vocab,
+            nt,
+            nt.bit_length() - 1,
+            min(5, nt.bit_length() - 1),
+            enable_fp_fusion=False,
+        )
+        items = 15 if p.dtype == torch.float32 else 30
+        tiles = triton.cdiv(vocab, 128 * items)
+        totals = torch.empty((1, tiles), device=device, dtype=p.dtype)
+        trace = torch.empty((vocab,), device=device, dtype=p.dtype)
+        native.base_tile_totals_kernel[(1, tiles)](
+            values, totals, vocab, items, enable_fp_fusion=False
+        )
+        _chain_trace_cdf[(tiles,)](
+            values, totals, trace, vocab, items, enable_fp_fusion=False
+        )
+        coin = kwargs["uniform_samples_for_final_sampling"][b]
+        native.base_sample_kernel[(1, tiles)](
+            values,
+            totals,
+            native_sum,
+            coin.reshape(1),
+            predicts,
+            slots,
+            vocab,
+            items,
+            False,
+            enable_fp_fusion=False,
+        )
+        torch.cuda.synchronize()
+        ref_sum = val.sum()
+        ref_cdf = val.cumsum(0)
+        rt = coin * ref_sum
+        ntarget = coin * native_sum[0]
+        ref_token = int(expected[0][reference_slot].item())
+        actual_token = int(actual[0][actual_slot].item())
+        traced_token = _chain_token(trace, ntarget)
+        isolated_token = int(predicts[0].item())
+        mixed = {
+            "torch_cdf_torch_sum": _chain_token(ref_cdf, rt),
+            "torch_cdf_native_sum": _chain_token(ref_cdf, ntarget),
+            "native_cdf_torch_sum": _chain_token(trace, rt),
+            "native_cdf_native_sum": traced_token,
+            "float64_analysis": _chain_token(
+                val.double().cumsum(0), coin.double() * val.double().sum()
+            ),
+        }
+        around = sorted(
+            {
+                i
+                for token in (ref_token, actual_token)
+                for i in range(max(0, token - 1), min(vocab, token + 2))
+            }
+        )
+        _chain_emit(
+            "cdf",
+            b=b,
+            values_exact=torch.equal(values[0], val),
+            reference_token=ref_token,
+            actual_token=actual_token,
+            isolated_native_token=isolated_token,
+            traced_native_token=traced_token,
+            trace_matches_actual=traced_token == actual_token == isolated_token,
+            coin=float(coin.item()),
+            reference_sum=float(ref_sum.item()),
+            native_sum=float(native_sum[0].item()),
+            reference_threshold=float(rt.item()),
+            native_threshold=float(ntarget.item()),
+            cdf_max_abs_diff=float((ref_cdf - trace).abs().max().item()),
+            mixed_tokens=mixed,
+            near_tokens=[
+                dict(
+                    index=i,
+                    torch_cdf=float(ref_cdf[i].item()),
+                    native_cdf=float(trace[i].item()),
+                    value=float(val[i].item()),
+                )
+                for i in around
+            ],
+        )

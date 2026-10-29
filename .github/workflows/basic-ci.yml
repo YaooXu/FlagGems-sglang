@@ -245,7 +245,7 @@ jobs:
           SELECTED_TESTS: ${{ needs.select-targets.outputs.tests }}
         run: |
           echo "Selected tests: ${SELECTED_TESTS}"
-          pytest -q ${SELECTED_TESTS} --quick
+          pytest -q -s ${SELECTED_TESTS} --quick
 
       - name: run selected benchmarks
         if: needs.select-targets.outputs.benchmarks != ''
