@@ -6,10 +6,27 @@
 
 def workloads(comprehensive=False):
     cases = [
-        dict(model=model, tokens=tokens, q_heads=heads, variant="documented")
+        dict(
+            model=model,
+            tokens=tokens,
+            q_heads=heads,
+            variant="documented",
+            position_layout="contiguous",
+        )
         for model, heads in (("27b", 6), ("35b", 4))
         for tokens in (20, 1)
     ]
+    # 35B explicitly records stride [512,1] for the static graph buffer.
+    cases.extend(
+        dict(
+            model="35b",
+            tokens=tokens,
+            q_heads=4,
+            variant="documented",
+            position_layout="graph_slice",
+        )
+        for tokens in (20, 1)
+    )
     if comprehensive:
         cases.append(
             dict(
@@ -17,6 +34,7 @@ def workloads(comprehensive=False):
                 tokens=3,
                 q_heads=4,
                 variant="distinct_strided_axes",
+                position_layout="graph_slice",
             )
         )
     return cases
@@ -43,7 +61,11 @@ def parameters(case):
         axis_map=None,
         position_dtype="torch.int64",
         position_stride=[
-            512 if case["variant"] != "documented" else case["tokens"],
+            (
+                512
+                if case["position_layout"] == "graph_slice"
+                else case["tokens"]
+            ),
             1,
         ],
         activation_dtype="torch.bfloat16",
@@ -77,11 +99,11 @@ def build_inputs(case, dtype, device):
     if count == 1:
         position += 20
     positions = position.repeat(3, 1)
-    if case["variant"] != "documented":
+    if case["position_layout"] == "graph_slice":
         backing = torch.zeros((3, 512), device=device, dtype=torch.int64)
-        backing[:, :count].copy_(
-            positions + torch.arange(3, device=device)[:, None] * 7
-        )
+        if case["variant"] != "documented":
+            positions = positions + torch.arange(3, device=device)[:, None] * 7
+        backing[:, :count].copy_(positions)
         positions = backing[:, :count]
     return dict(
         q=normal(shape["q"], 0.5).to(dtype),

@@ -38,7 +38,10 @@ def _clone(inputs, device=None):
 @pytest.mark.parametrize(
     "case",
     CASES,
-    ids=[f"{c['model']}-{c['tokens']}-{c['variant']}" for c in CASES],
+    ids=[
+        f"{c['model']}-{c['tokens']}-{c['position_layout']}-{c['variant']}"
+        for c in CASES
+    ],
 )
 def test_triton_mrope_fused(case):
     reference = get_reference("triton_mrope_fused")

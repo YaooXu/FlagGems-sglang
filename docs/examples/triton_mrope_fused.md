@@ -9,7 +9,7 @@ export PYTHONPATH="$PWD/src${PYTHONPATH:+:$PYTHONPATH}"
 CANDIDATE=examples/candidates/triton_mrope_fused_sglang.py
 OVERRIDE="triton_mrope_fused:$CANDIDATE:triton_mrope_fused"
 
-# Real native Triton candidate versus the portable Torch oracle, all five cases.
+# Real native Triton candidate versus the portable Torch oracle, all seven cases.
 pytest -q tests/test_triton_mrope_fused.py -m triton_mrope_fused --override "$OVERRIDE"
 pytest -q tests/test_triton_mrope_fused.py -m triton_mrope_fused --override "$OVERRIDE" --ref cpu
 
@@ -17,7 +17,7 @@ pytest -q tests/test_triton_mrope_fused.py -m triton_mrope_fused --override "$OV
 pytest -q benchmark/test_triton_mrope_fused.py -m triton_mrope_fused \
   --level core --list-cases --output mrope-cases.json
 
-# Time the actual injected candidate on the four documented configurations.
+# Time the actual injected candidate on the six documented shape/layout cases.
 pytest -q benchmark/test_triton_mrope_fused.py -m triton_mrope_fused \
   --override "$OVERRIDE" --level core --warmup 1 --iter 1 \
   --record json --output mrope-timing.json
@@ -41,8 +41,8 @@ ordinary mode a missing public candidate skips; there is no silent fallback
 to the reference. Use an override or explicit reference mode to execute it.
 
 For exact replay, copy a `case_id` from `mrope-cases.json` and pass it as
-`--case-id '...'` to the benchmark command. Core lists four cases;
-comprehensive lists five. Neither mode changes the existing test runners.
+`--case-id '...'` to the benchmark command. Core lists six cases;
+comprehensive lists seven. Neither mode changes the existing test runners.
 
 ## Contract and cases
 
@@ -50,21 +50,26 @@ The [27B workload](https://infrawaves.feishu.cn/wiki/KNeSwTT8miLWWZkWlWzcc3i0nMc
 and [35B-A3B workload](https://infrawaves.feishu.cn/wiki/VInzwGiF1ipx5ckwgKjcq1hqnLe)
 describe SGLang v0.5.11, TP=4:
 
-| Case | BF16 Q | BF16 K | INT64 positions |
-| --- | --- | --- | --- |
-| 27B prefill | `[20,1536]` | `[20,256]` | `[3,20]` |
-| 27B decode | `[1,1536]` | `[1,256]` | `[3,1]`, value20 |
-| 35B prefill | `[20,1024]` | `[20,256]` | `[3,20]` |
-| 35B decode | `[1,1024]` | `[1,256]` | `[3,1]`, value20 |
+| Case | BF16 Q | BF16 K | INT64 positions | Positions stride |
+| --- | --- | --- | --- | --- |
+| 27B prefill, eager | `[20,1536]` | `[20,256]` | `[3,20]` | `[20,1]` |
+| 27B decode, eager | `[1,1536]` | `[1,256]` | `[3,1]`, value20 | `[1,1]` |
+| 35B prefill, eager | `[20,1024]` | `[20,256]` | `[3,20]` | `[20,1]` |
+| 35B decode, eager | `[1,1024]` | `[1,256]` | `[3,1]`, value20 | `[1,1]` |
+| 35B prefill, graph-buffer slice | `[20,1024]` | `[20,256]` | `[3,20]` | `[512,1]` |
+| 35B decode, graph-buffer slice | `[1,1024]` | `[1,256]` | `[3,1]`, value20 | `[512,1]` |
 
 Common: BF16 cos/sin cache `[262400,64]`, head_size256, rotary_dim64,
 mrope_section `[11,11,10]`, interleaved=True, GLM=False, Neox=True,
 axis_map=None. The function returns **None** and modifies Q/K in place.
 Their last192 channels and all other inputs must stay exactly unchanged.
 
-The fifth correctness/comprehensive case uses three tokens with distinct
+The seventh correctness/comprehensive case uses three tokens with distinct
 THW positions and position stride `[512,1]`. This is an additional boundary
-control, not a claimed model trace. The documents do not provide actual
+control, not a claimed model trace. Graph-buffer cases reproduce the input
+layout; executing this example does not require capturing a CUDA Graph.
+The 27B document mentions a noncontiguous graph slice without specifying its
+stride; the exact `[512,1]` layout comes from the 35B document. The documents do not provide actual
 tensors or numerical thresholds: synthetic inputs use an isolated seed0,
 BF16 activations from FP32 normal(std0.5), and BF16 cos/sin of FP32
 normal(std1) angles. Prefill positions use `arange(T)`; the extra case adds

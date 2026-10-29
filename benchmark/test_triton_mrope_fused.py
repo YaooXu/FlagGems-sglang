@@ -20,9 +20,10 @@ from . import conftest
 from .cases import BenchmarkCasePlan, single_input_builder
 from .op_benchmark import OpBenchmark, is_case_listing
 
+CORE = workloads()
 ALL = workloads(comprehensive=True)
-SHAPES = [(i,) for i in range(4)]
-MORE_SHAPES = [(4,)]
+SHAPES = [(i,) for i in range(len(CORE))]
+MORE_SHAPES = [(i,) for i in range(len(CORE), len(ALL))]
 
 
 def _input_fn(shape, cur_dtype, device):
